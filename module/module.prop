@@ -1,0 +1,6 @@
+id=oplus_sensor_bridge
+name=Oplus Sensor Bridge (onyx)
+version=v1.0
+versionCode=1
+author=Nischay_12089
+description=Raise to wake + pick-up AOD for OxygenOS on POCO F7: exposes OnePlus pick_up_motion (type 22) and AMD (33171026) sensors via a Multi-HAL sub-HAL fed from the Xiaomi sensor hub.

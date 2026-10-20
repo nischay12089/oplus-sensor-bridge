@@ -1,0 +1,22 @@
+# oplus-sensor-bridged: feeds sensors.oplusbridge.so (first entry in /vendor/etc/sensors/hals.conf)
+# with pickup/AMD events, keeps the AOD lit (panel doze brightness, when ro.sys.nischay.bomb=1),
+# and serves vendor.oplus.hardware.displaypanelfeature so SystemUI allows full-screen AOD all day.
+# class hal: the panel service must be registered before SystemUI starts and reads it.
+# Labeled hal_sensors_default_exec, so init runs it in the sensors HAL domain.
+service vendor.oplus-sensor-bridged /vendor/bin/hw/oplus-sensor-bridged
+    class hal
+    user system
+    group system wakelock graphics
+    capabilities BLOCK_SUSPEND
+    task_profiles ServiceCapacityLow
+
+# The same binary, one-shot: applies the AOD defaults after the first boot of a fresh flash, once
+# setup has finished (no-op afterwards). uid shell: `cmd settings put` only accepts shell or root.
+service vendor.oplus-aod-defaults /vendor/bin/hw/oplus-sensor-bridged --aod-defaults
+    user shell
+    group shell
+    oneshot
+    disabled
+
+on property:sys.boot_completed=1 && property:persist.sys.device_provisioned=1
+    start vendor.oplus-aod-defaults

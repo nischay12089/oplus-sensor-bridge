@@ -1,0 +1,5 @@
+# sensors.oplusbridge.so runs inside the multihal (hal_sensors_default) and listens on an
+# abstract AF_UNIX SOCK_SEQPACKET socket (SELinux class unix_stream_socket).
+allow hal_sensors_default hal_sensors_default unix_stream_socket { create bind listen accept read write getattr getopt setopt shutdown }
+# oplus-sensor-bridged runs as root from service.sh (su domain) and connects to it.
+allow su hal_sensors_default unix_stream_socket connectto

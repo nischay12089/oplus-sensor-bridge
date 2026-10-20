@@ -1,0 +1,8 @@
+out/
+sysroot/vendor_lib64/
+*.so
+!aosp/**/*.so
+tools/sensorprobe
+tools/sysfspoll
+*.zip
+*.apk

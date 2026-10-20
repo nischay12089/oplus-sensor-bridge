@@ -1,0 +1,23 @@
+;; oplus sensor bridge: sub-HAL in the multihal and oplus-sensor-bridged both run as hal_sensors_default
+(allow hal_sensors_default self (unix_stream_socket (create bind listen accept connect connectto read write getattr getopt setopt shutdown)))
+(allow hal_sensors_default fwk_sensor_service_202404 (service_manager (find)))
+(allow system_server_202404 hal_sensors_default (binder (call transfer)))
+;; AOD keep-alive: mi_disp doze-brightness ioctl + read the ro.sys.nischay.bomb gate, and the
+;; panel's AOD brightness through the driver's mipi_rw node
+(allow hal_sensors_default vendor_displayfeature_device (chr_file (ioctl read write getattr open)))
+(allow hal_sensors_default default_prop_202404 (file (read getattr map open)))
+(allow hal_sensors_default vendor_sysfs_displayfeature (dir (search)))
+(allow hal_sensors_default vendor_sysfs_displayfeature (file (read write getattr open)))
+;; fingerprint press/release (poll) from the touch driver: no AOD brightness writes while pressed
+(allow hal_sensors_default sysfs_tp_fodstatus (file (read getattr open)))
+;; OnePlus display panel capabilities service (vendor.oplus.hardware.displaypanelfeature), queried by SystemUI
+(type hal_oplus_displaypanelfeature_service)
+(roletype object_r hal_oplus_displaypanelfeature_service)
+(typeattributeset protected_service (hal_oplus_displaypanelfeature_service))
+(typeattributeset service_manager_type (hal_oplus_displaypanelfeature_service))
+(typeattributeset hal_service_type (hal_oplus_displaypanelfeature_service))
+(allow hal_sensors_default hal_oplus_displaypanelfeature_service (service_manager (add find)))
+(allow platform_app_202404 hal_oplus_displaypanelfeature_service (service_manager (find)))
+(allow system_server_202404 hal_oplus_displaypanelfeature_service (service_manager (find)))
+(allow platform_app_202404 hal_sensors_default (binder (call transfer)))
+(allow hal_sensors_default platform_app_202404 (binder (transfer)))

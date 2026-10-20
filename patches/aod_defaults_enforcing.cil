@@ -1,0 +1,9 @@
+;; Optional, Enforcing builds only: lets the AOD-defaults one-shot (oplus-sensor-bridged
+;; --aod-defaults, domain hal_sensors_default) run /system/bin/cmd settings. Taken from the onyx
+;; ROM's working policy. Note these widen hal_sensors_default (shared with the QTI sensors HAL).
+(allow hal_sensors_default system_file_202404 (file (read open execute execute_no_trans map getattr)))
+(allow hal_sensors_default settings_service_202404 (service_manager (find)))
+(allow hal_sensors_default system_server_202404 (binder (call transfer)))
+(allow hal_sensors_default system_server_202404 (fd (use)))
+(allow system_server_202404 hal_sensors_default (binder (transfer)))
+(allow system_server_202404 hal_sensors_default (fifo_file (write)))

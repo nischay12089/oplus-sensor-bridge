@@ -1,0 +1,1 @@
+/(vendor|system/vendor)/bin/hw/oplus-sensor-bridged  u:object_r:hal_sensors_default_exec:s0

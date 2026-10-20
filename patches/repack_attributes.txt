@@ -1,0 +1,20 @@
+# Owner / mode / SELinux label of every file, for image repack tools (fs_config + file_contexts).
+
+# ---- vendor partition ----
+# fs_config  (path uid gid mode)
+vendor/lib64/sensors.oplusbridge.so 0 0 0644
+vendor/bin/hw/oplus-sensor-bridged 0 2000 0755
+vendor/etc/init/vendor.oplus-sensor-bridged.rc 0 0 0644
+vendor/etc/sensors/hals.conf 0 0 0644
+vendor/etc/selinux/vendor_sepolicy.cil 0 0 0644
+vendor/etc/selinux/vendor_file_contexts 0 0 0644
+vendor/etc/selinux/vendor_service_contexts 0 0 0644
+
+# file_contexts
+/vendor/lib64/sensors\.oplusbridge\.so u:object_r:vendor_file:s0
+/vendor/bin/hw/oplus-sensor-bridged u:object_r:hal_sensors_default_exec:s0
+/vendor/etc/init/vendor\.oplus-sensor-bridged\.rc u:object_r:vendor_configs_file:s0
+/vendor/etc/sensors/hals\.conf u:object_r:vendor_configs_file:s0
+/vendor/etc/selinux/vendor_sepolicy\.cil u:object_r:vendor_configs_file:s0
+/vendor/etc/selinux/vendor_file_contexts u:object_r:vendor_configs_file:s0
+/vendor/etc/selinux/vendor_service_contexts u:object_r:vendor_configs_file:s0
