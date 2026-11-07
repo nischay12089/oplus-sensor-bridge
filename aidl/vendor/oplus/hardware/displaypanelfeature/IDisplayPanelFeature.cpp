@@ -1,6 +1,6 @@
 /*
  * This file is auto-generated.  DO NOT MODIFY.
- * Using: C:\Users\Nischay_12089\AppData\Local\Android\Sdk\build-tools\35.0.0\aidl.exe --lang=ndk --structured --stability=vintf --version=1 -o C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -h C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -I C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl\vendor\oplus\hardware\displaypanelfeature\IDisplayPanelFeature.aidl
+ * Using: aidl --lang=ndk --structured --stability=vintf --version=1 --hash=39afca22ac77253421ad681eeb2bae0c6ff62c13 -o gen -h gen -I aidl aidl/vendor/oplus/hardware/displaypanelfeature/IDisplayPanelFeature.aidl (build-tools 35.0.0)
  */
 #include "aidl/vendor/oplus/hardware/displaypanelfeature/IDisplayPanelFeature.h"
 
@@ -74,9 +74,6 @@ static binder_status_t _aidl_vendor_oplus_hardware_displaypanelfeature_IDisplayP
       _aidl_ret_status = ::ndk::AParcel_readData(_aidl_in, &in_id);
       if (_aidl_ret_status != STATUS_OK) break;
 
-      _aidl_ret_status = ::ndk::AParcel_resizeVector(_aidl_in, &out_info);
-      if (_aidl_ret_status != STATUS_OK) break;
-
       ::ndk::ScopedAStatus _aidl_status = _aidl_impl->getDisplayPanelInfo(in_id, &out_info, &_aidl_return);
       _aidl_ret_status = AParcel_writeStatusHeader(_aidl_out, _aidl_status.get());
       if (_aidl_ret_status != STATUS_OK) break;
@@ -95,6 +92,20 @@ static binder_status_t _aidl_vendor_oplus_hardware_displaypanelfeature_IDisplayP
       int32_t _aidl_return;
 
       ::ndk::ScopedAStatus _aidl_status = _aidl_impl->getInterfaceVersion(&_aidl_return);
+      _aidl_ret_status = AParcel_writeStatusHeader(_aidl_out, _aidl_status.get());
+      if (_aidl_ret_status != STATUS_OK) break;
+
+      if (!AStatus_isOk(_aidl_status.get())) break;
+
+      _aidl_ret_status = ::ndk::AParcel_writeData(_aidl_out, _aidl_return);
+      if (_aidl_ret_status != STATUS_OK) break;
+
+      break;
+    }
+    case (FIRST_CALL_TRANSACTION + 16777213 /*getInterfaceHash*/): {
+      std::string _aidl_return;
+
+      ::ndk::ScopedAStatus _aidl_status = _aidl_impl->getInterfaceHash(&_aidl_return);
       _aidl_ret_status = AParcel_writeStatusHeader(_aidl_out, _aidl_status.get());
       if (_aidl_ret_status != STATUS_OK) break;
 
@@ -215,9 +226,6 @@ BpDisplayPanelFeature::~BpDisplayPanelFeature() {}
   _aidl_ret_status = ::ndk::AParcel_writeData(_aidl_in.get(), in_id);
   if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
 
-  _aidl_ret_status = ::ndk::AParcel_writeVectorSize(_aidl_in.get(), *out_info);
-  if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
-
   _aidl_ret_status = AIBinder_transact(
     asBinder().get(),
     (FIRST_CALL_TRANSACTION + 2 /*getDisplayPanelInfo*/),
@@ -292,6 +300,50 @@ BpDisplayPanelFeature::~BpDisplayPanelFeature() {}
   _aidl_status_return:
   return _aidl_status;
 }
+::ndk::ScopedAStatus BpDisplayPanelFeature::getInterfaceHash(std::string* _aidl_return) {
+  binder_status_t _aidl_ret_status = STATUS_OK;
+  ::ndk::ScopedAStatus _aidl_status;
+  const std::lock_guard<std::mutex> lock(_aidl_cached_hash_mutex);
+  if (_aidl_cached_hash != "-1") {
+    *_aidl_return = _aidl_cached_hash;
+    _aidl_status.set(AStatus_fromStatus(_aidl_ret_status));
+    return _aidl_status;
+  }
+  ::ndk::ScopedAParcel _aidl_in;
+  ::ndk::ScopedAParcel _aidl_out;
+
+  _aidl_ret_status = AIBinder_prepareTransaction(asBinder().get(), _aidl_in.getR());
+  if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
+
+  _aidl_ret_status = AIBinder_transact(
+    asBinder().get(),
+    (FIRST_CALL_TRANSACTION + 16777213 /*getInterfaceHash*/),
+    _aidl_in.getR(),
+    _aidl_out.getR(),
+    0
+    #ifdef BINDER_STABILITY_SUPPORT
+    | FLAG_PRIVATE_LOCAL
+    #endif  // BINDER_STABILITY_SUPPORT
+    );
+  if (_aidl_ret_status == STATUS_UNKNOWN_TRANSACTION && IDisplayPanelFeature::getDefaultImpl()) {
+    _aidl_status = IDisplayPanelFeature::getDefaultImpl()->getInterfaceHash(_aidl_return);
+    goto _aidl_status_return;
+  }
+  if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
+
+  _aidl_ret_status = AParcel_readStatusHeader(_aidl_out.get(), _aidl_status.getR());
+  if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
+
+  if (!AStatus_isOk(_aidl_status.get())) goto _aidl_status_return;
+  _aidl_ret_status = ::ndk::AParcel_readData(_aidl_out.get(), _aidl_return);
+  if (_aidl_ret_status != STATUS_OK) goto _aidl_error;
+
+  _aidl_cached_hash = *_aidl_return;
+  _aidl_error:
+  _aidl_status.set(AStatus_fromStatus(_aidl_ret_status));
+  _aidl_status_return:
+  return _aidl_status;
+}
 // Source for BnDisplayPanelFeature
 BnDisplayPanelFeature::BnDisplayPanelFeature() {}
 BnDisplayPanelFeature::~BnDisplayPanelFeature() {}
@@ -304,6 +356,10 @@ BnDisplayPanelFeature::~BnDisplayPanelFeature() {}
 }
 ::ndk::ScopedAStatus BnDisplayPanelFeature::getInterfaceVersion(int32_t* _aidl_return) {
   *_aidl_return = IDisplayPanelFeature::version;
+  return ::ndk::ScopedAStatus(AStatus_newOk());
+}
+::ndk::ScopedAStatus BnDisplayPanelFeature::getInterfaceHash(std::string* _aidl_return) {
+  *_aidl_return = IDisplayPanelFeature::hash;
   return ::ndk::ScopedAStatus(AStatus_newOk());
 }
 // Source for IDisplayPanelFeature
@@ -372,6 +428,10 @@ std::shared_ptr<IDisplayPanelFeature> IDisplayPanelFeature::default_impl = nullp
 }
 ::ndk::ScopedAStatus IDisplayPanelFeatureDefault::getInterfaceVersion(int32_t* _aidl_return) {
   *_aidl_return = 0;
+  return ::ndk::ScopedAStatus(AStatus_newOk());
+}
+::ndk::ScopedAStatus IDisplayPanelFeatureDefault::getInterfaceHash(std::string* _aidl_return) {
+  *_aidl_return = "";
   return ::ndk::ScopedAStatus(AStatus_newOk());
 }
 ::ndk::SpAIBinder IDisplayPanelFeatureDefault::asBinder() {

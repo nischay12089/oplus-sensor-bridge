@@ -41,6 +41,7 @@
 #include <vector>
 
 #include "bridge_proto.h"
+#include "panel_command_guard.h"
 
 #ifdef BRIDGE_PANEL_FEATURE
 #include <aidl/vendor/oplus/hardware/displaypanelfeature/BnDisplayPanelFeature.h>
@@ -144,7 +145,6 @@ constexpr char kDispFeatureDev[] = "/dev/mi_display/disp_feature";
 constexpr char kBacklightNode[] = "/sys/class/backlight/panel0-backlight/brightness";
 constexpr char kDozeNode[] = "/sys/devices/virtual/mi_display/disp_feature/disp-DSI-0/doze_brightness";
 constexpr char kMipiNode[] = "/sys/devices/virtual/mi_display/disp_feature/disp-DSI-0/mipi_rw";
-constexpr char kFodNode[] = "/sys/devices/virtual/touch/touch_dev/fod_press_status";  // 1 = finger down
 // AOD mode renders a DBV ~2.4x brighter than normal mode: a fade ending at register 1945 matches the
 // panel's normal AOD level, DBV 808.
 constexpr float kAodGain = 1945.0f / 808.0f;
@@ -158,6 +158,9 @@ constexpr uint32_t kDozeLow = 2;   // panel's dim AOD level
 // a flash on wake). With the stock brightness table SystemUI's dark-room target (rank 0) ends the
 // fade at register ~68 and every other ambient rank at >= ~529.
 constexpr int kLowAodMaxRegister = 200;
+// A fade never ends below SystemUI's darkest AOD target (register ~68); lower registers are the
+// framework's fallback (~5) or 0 and must not be matched (they gave DBV 16, nearly off).
+constexpr int kMinFadeRegister = 40;
 struct DozeReq {
     uint32_t flag;
     uint32_t dispId;
@@ -169,34 +172,39 @@ bool gateEnabled() {
     return __system_property_get(kGateProp, v) > 0 && strcmp(v, "1") == 0;
 }
 
+int liveScreenState() {
+    char value[PROP_VALUE_MAX] = {};
+    return __system_property_get(kScreenStateProp, value) > 0 ? atoi(value) : -1;
+}
+
 class DozeKeeper {
   public:
     void run() {
         if (!gateEnabled()) return;  // ro.* is fixed at boot: off now means off for good
-        std::thread([this] { fingerprintLoop(); }).detach();
         const prop_info* pi = waitForProp(kScreenStateProp);
         uint32_t serial = 0;
         int prev = -1;
         for (;;) {
-            char v[PROP_VALUE_MAX] = {};
-            __system_property_get(kScreenStateProp, v);
-            int state = atoi(v);
-            mState = state;
+            int state = liveScreenState();
             const bool inAod = state == 3 || state == 4;
             bool dbvPending = false;  // the kernel may have put its own fixed DBV in
+            bool applyLate = false;   // set the AOD level shortly before the panel enters AOD
             if (inAod) {
                 const bool entered = prev != 3 && prev != 4;
-                // Only the full-screen AOD enters doze straight from ON, after its fade has ramped
+                // Only the full-screen AOD enters doze straight from ON after a fade that ramped
                 // the backlight to the ambient-light target; every other clock style goes
-                // ON -> OFF -> doze with no meaningful register, so it gets the fixed level.
-                if (prev == 2) mFollowFade = true;
+                // ON -> OFF -> doze with no meaningful register, so it gets the fixed level. A
+                // fingerprint wake that never fully turned the screen on also returns straight
+                // from ON, but at the framework's fallback register (~5): not a fade.
+                const int reg = readInt(kBacklightNode);
+                if (prev == 2) mFollowFade = reg >= kMinFadeRegister;
                 else if (prev == 1) mFollowFade = false;
                 int dbv = mDbv;
                 if (mFollowFade) {
                     // Re-read on every doze <-> doze-suspend change too: SystemUI updates the AOD
-                    // brightness when the ambient light changes.
-                    int reg = readInt(kBacklightNode);
-                    if (reg > 0) {
+                    // brightness when the ambient light changes. A register below any AOD target
+                    // (0 while energy-saving AOD hides itself, or the fallback) is not one.
+                    if (reg >= kMinFadeRegister) {
                         mLevel = reg < kLowAodMaxRegister ? kDozeLow : kDozeHigh;
                         dbv = std::clamp(static_cast<int>(reg / kAodGain + 0.5f), kAodDbvMin, kAodDbvMax);
                     }
@@ -213,20 +221,29 @@ class DozeKeeper {
                 // doze-suspend leaves level and DBV alone (measured), so the ioctl is skipped then
                 // and a new target (ambient light) is simply written.
                 if (entered || readInt(kDozeNode) != static_cast<int>(mLevel)) {
-                    apply(mLevel);
+                    // Straight from ON the panel stays lit in normal mode until it enters AOD
+                    // (116-134 ms after the state flips, measured), and the level's command set
+                    // starts with a normal-mode DBV write (51 03 28 = 808): sent at once, it
+                    // snapped the screen to 808 for ~0.13 s mid screen-off. Sent late, the snap
+                    // is a few frames, and the panel still enters AOD with its level set.
+                    if (entered && prev == 2) applyLate = true;
+                    else apply(mLevel);
                     dbvPending = true;
                 } else if (dbvChanged) {
-                    writeDbvUnlessTouched();
+                    writeAodDbv();
                 }
             } else if (state == 1) {
+                // No level here: the panel is still lit for ~0.1 s after the state flips to OFF,
+                // so the level's DBV write dimmed the screen-off (or re-lit the panel after the
+                // framework blanked it), and the kernel re-sends the level anyway when the panel
+                // next powers on into AOD.
                 mFollowFade = false;
-                apply(kDozeHigh);
             } else if (state == 2 && prev != 2) {
                 mFollowFade = false;
                 apply(kDozeOff);
             }
             prev = state;
-            serial = waitForChange(pi, serial, inAod, dbvPending);
+            serial = waitForChange(pi, serial, inAod, dbvPending, applyLate);
         }
     }
 
@@ -239,72 +256,74 @@ class DozeKeeper {
     //    the AOD level off ~0.3-0.8 s after a doze <-> doze-suspend change and rewrite the DBV: the
     //    level is re-checked (a plain sysfs read) at 0.3/0.8/1.5/3 s and the DBV at 0.3 s.
     // Full-screen AOD going between doze and doze-suspend needs neither (measured): no wake-ups.
-    uint32_t waitForChange(const prop_info* pi, uint32_t serial, bool inAod, bool dbvPending) {
-        static constexpr int kAtMs[] = {120, 160, 200, 240, 280, 300, 340, 440, 600, 800, 1500, 3000};
-        const bool classic = inAod && !mFollowFade;
+    //
+    // The screen-state property flips ~0.13 s before the panel really enters AOD, and the
+    // framework's fallback write (DBV 15) comes ~10-60 ms after that, so a right read-back only
+    // counts as settled from kSettleMs on: earlier it may still be the kernel's preset in normal
+    // mode. Likewise an entry straight from ON only proves to be a full-screen fade if the register
+    // stays at an AOD target; dropping to the fallback means it was not one.
+    //
+    // applyLate: an entry straight from ON sets the AOD level at kApplyLateMs, just before the
+    // panel enters AOD, not at the flip (it is still lit in normal mode until then); a change of
+    // state before that skips it.
+    uint32_t waitForChange(const prop_info* pi, uint32_t serial, bool inAod, bool dbvPending,
+                           bool applyLate) {
+        static constexpr int kApplyLateMs = 100;
+        static constexpr int kAtMs[] = {kApplyLateMs, 120, 160, 200, 240, 280, 300, 340, 440, 600,
+                                        800, 1500, 3000};
+        static constexpr int kSettleMs = 400;
         uint32_t next = serial;
         int elapsed = 0;
         for (int at : kAtMs) {
-            const bool levelAt = classic && (at == 300 || at == 800 || at == 1500 || at == 3000);
-            bool dbvAt = inAod && (dbvPending || (classic && at == 300));
-            if (!levelAt && !dbvAt) continue;
+            const bool lateAt = at == kApplyLateMs;
+            const bool classic = inAod && !mFollowFade;
+            const bool levelAt = !lateAt && classic && (at == 300 || at == 800 || at == 1500 || at == 3000);
+            bool dbvAt = !lateAt && inAod && (dbvPending || (classic && at == 300));
+            if (lateAt ? !applyLate : !levelAt && !dbvAt) continue;
             const int gap = at - elapsed;
             elapsed = at;
             timespec ts{gap / 1000, (gap % 1000) * 1000000L};
             if (__system_property_wait(pi, serial, &next, &ts)) return next;
+            if (lateAt) {
+                apply(mLevel);
+                continue;
+            }
+            if (dbvPending && mFollowFade) {
+                const int reg = readInt(kBacklightNode);
+                if (reg >= 0 && reg < kMinFadeRegister) {  // no fade: other clock style
+                    mFollowFade = false;
+                    mDbv = kAodDbvMax;
+                    if (mLevel != kDozeHigh) {
+                        mLevel = kDozeHigh;
+                        apply(mLevel);
+                    }
+                }
+            }
             if (levelAt && readInt(kDozeNode) != static_cast<int>(mLevel)) {
                 apply(mLevel);
                 dbvPending = dbvAt = true;
             }
-            if (dbvAt && syncDbv()) dbvPending = false;
+            if (dbvAt && syncDbv() && at >= kSettleMs) dbvPending = false;
         }
         __system_property_wait(pi, serial, &next, nullptr);
         return next;
     }
 
     // Makes the panel show the AOD DBV (fade-matched, or the normal AOD level for the other clock
-    // styles); returns true once it reads back right. Not while a finger is on the sensor (the
-    // kernel drives the panel for the fingerprint then), and not while the DBV still equals the
+    // styles); returns true once it reads back right. Not while the DBV still equals the
     // normal-mode backlight register: the panel has not entered AOD yet, and writing then would
     // dim the screen before AOD starts.
     bool syncDbv() {
-        if (readInt(kFodNode) == 1) return false;
-        std::lock_guard<std::mutex> lock(mMipiLock);
+        if (!isDozeScreenState(liveScreenState())) return true;
         int dbv = readDbv();
         if (dbv == mDbv) return true;
         if (dbv >= 0 && dbv != readInt(kBacklightNode)) writeDbv(mDbv);
         return false;
     }
 
-    void writeDbvUnlessTouched() {
-        if (readInt(kFodNode) == 1) return;  // the release handler puts it back afterwards
-        std::lock_guard<std::mutex> lock(mMipiLock);
+    void writeAodDbv() {
+        if (!isDozeScreenState(liveScreenState())) return;
         writeDbv(mDbv);
-    }
-
-    // Sleeps in poll() on the touch driver's fingerprint-press node (woken on press and release).
-    // When the finger is lifted, the kernel's local-HBM release puts its own DBV into the panel
-    // (the screen-on backlight, even in AOD), so the AOD one is put back after it.
-    void fingerprintLoop() {
-        int fd = open(kFodNode, O_RDONLY | O_CLOEXEC);
-        if (fd < 0) return;
-        char buf[8];
-        pread(fd, buf, sizeof(buf), 0);  // sysfs only notifies after a read
-        for (;;) {
-            pollfd p{fd, POLLPRI | POLLERR, 0};
-            if (poll(&p, 1, -1) < 0) {
-                if (errno == EINTR) continue;
-                break;
-            }
-            if (pread(fd, buf, sizeof(buf), 0) <= 0 || buf[0] != '0') continue;  // pressed
-            static constexpr int kReleaseGapsMs[] = {60, 100, 200, 400};
-            for (int gap : kReleaseGapsMs) {
-                usleep(gap * 1000);
-                int s = mState;
-                if ((s != 3 && s != 4) || syncDbv()) break;
-            }
-        }
-        close(fd);
     }
 
     // The panel's brightness register (DCS 0x51/0x52, 2 bytes big-endian) through the display
@@ -318,6 +337,7 @@ class DozeKeeper {
     }
 
     static void writeDbv(int dbv) {
+        if (!isDozeScreenState(liveScreenState())) return;
         char cmd[48];
         snprintf(cmd, sizeof(cmd), "00 00 00 39 00 00 00 00 00 03 51 %02X %02X", (dbv >> 8) & 0xff,
                  dbv & 0xff);
@@ -347,27 +367,26 @@ class DozeKeeper {
     }
 
     bool applyOnce(uint32_t value) {
+        if (!permitsDozeLevel(liveScreenState(), value)) return false;
         if (mFd < 0) mFd = open(kDispFeatureDev, O_RDWR | O_CLOEXEC);
         if (mFd < 0) return false;
         DozeReq req{0, 0, value};
         return ioctl(mFd, kMiDispSetDozeBrightness, &req) == 0;
     }
 
-    // The panel driver returns EINVAL right at a doze transition; retry until it accepts.
+    // A transition can reject the first ioctl. Cancel retries as soon as their
+    // screen state ends, so an old AOD command cannot dim the awake lockscreen.
     void apply(uint32_t value) {
-        for (int i = 0; i < 25; i++) {  // up to ~3.7 s
-            if (applyOnce(value)) return;
-            usleep(150 * 1000);
-        }
+        applyDozeLevelWhileCurrent(value, liveScreenState,
+            [this](uint32_t level) { return applyOnce(level); },
+            [] { usleep(150 * 1000); });
     }
 
     int mFd = -1;
     uint32_t mLevel = kDozeHigh;
-    // Shared with the fingerprint thread.
-    std::atomic<int> mState{-1};
-    std::atomic<bool> mFollowFade{false};  // this AOD session is the full-screen one, from its fade
-    std::atomic<int> mDbv{kAodDbvMax};
-    std::mutex mMipiLock;  // the MIPI node holds one pending read-back
+    // Accessed only by the doze worker; no fingerprint monitoring or release writes.
+    bool mFollowFade = false;
+    int mDbv = kAodDbvMax;
 };
 
 // --- First-boot AOD defaults ----------------------------------------------------------------------
@@ -494,21 +513,38 @@ void applyAodDefaults() {
 constexpr int32_t kFeatureAodPanelCaps = 217;
 constexpr int32_t kCapPanoramic = 4;
 constexpr int32_t kCapPanoramicAllDay = 8;
+constexpr int32_t kCapSmoothTransition = 2;  // SystemUI animates screen-off instead of cutting to black
+constexpr int32_t kCapDozeDirect = 1;        // gotoDozeWithOff=false: panel goes ON->DOZE, no OFF gap
+// Feature 211 = udfps type. Without bit 16 SystemUI takes the "optical, no local HBM" sleep path
+// (AodType 5001): a black mask over the lockscreen until the panel is in DOZE, then the AOD fades in.
+// With it, the lockscreen morphs into the panoramic AOD while the backlight ramps (AodType 4001).
+// Bit 16 is the truth here: mi_disp lights the sensor itself (LHBM_ON_WHITE_1000NIT on finger down),
+// so SystemUI also drops its own FP dim layer/highlight. system_server's FP path reads only bits
+// 4/1024, so it behaves as with no answer.
+constexpr int32_t kFeatureUdfpsType = 211;
+constexpr int32_t kUdfpsLocalHbm = 16;
 constexpr char kPanelFeatureService[] =
         "vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default";
 
 // Every other feature must look exactly as it did with no service at all, so callers keep their own
 // defaults: they read values[0] whatever `ret` says, and a 0 there is a real answer (feature 211 = 0
 // turned on SystemUI's fingerprint dim layer and system_server's "optical without local HBM" mode:
-// bright fingerprint icon over a dimmed lockscreen). "Unknown transaction" reaches Java callers as a
-// RemoteException, the same fallback path as a missing service.
+// bright fingerprint icon over a dimmed lockscreen; 211 is now answered with 16, see above).
+// "Unknown transaction" reaches Java callers as a RemoteException, the same fallback path as a
+// missing service.
 class PanelFeature : public aidl::vendor::oplus::hardware::displaypanelfeature::BnDisplayPanelFeature {
   public:
     // `values` arrives pre-sized to the caller's array length and must keep that length.
     ndk::ScopedAStatus getDisplayPanelFeatureValue(int32_t id, std::vector<int32_t>* values,
                                                    int32_t* ret) override {
-        if (id != kFeatureAodPanelCaps || values == nullptr || values->empty()) return unsupported();
-        (*values)[0] = kCapPanoramic | kCapPanoramicAllDay;
+        if (values == nullptr || values->empty()) return unsupported();
+        if (id == kFeatureAodPanelCaps) {
+            (*values)[0] = kCapPanoramic | kCapPanoramicAllDay | kCapSmoothTransition | kCapDozeDirect;
+        } else if (id == kFeatureUdfpsType) {
+            (*values)[0] = kUdfpsLocalHbm;
+        } else {
+            return unsupported();
+        }
         *ret = 0;
         return ndk::ScopedAStatus::ok();
     }
@@ -520,6 +556,9 @@ class PanelFeature : public aidl::vendor::oplus::hardware::displaypanelfeature::
         return ndk::ScopedAStatus::ok();
     }
 
+    // `out List<String>`: the request carries only the id (an `out String[]` stub also read an array
+    // length the framework never sends, so its call failed with NOT_ENOUGH_DATA, which system_server
+    // does not catch). Unknown transaction reaches callers as RemoteException, which they handle.
     ndk::ScopedAStatus getDisplayPanelInfo(int32_t, std::vector<std::string>*, int32_t*) override {
         return unsupported();
     }
@@ -697,8 +736,10 @@ int main(int argc, char** argv) {
 #ifdef BRIDGE_PANEL_FEATURE
     startPanelFeatureService();
 #endif
+#ifndef BRIDGE_NO_PANEL_WRITES
     // Independent of the sensor bridge: start even if sensorservice is not up yet.
     std::thread([] { DozeKeeper().run(); }).detach();
+#endif
 
     Bridge bridge;
     // The framework sensor service may not be up yet when started early in boot.
