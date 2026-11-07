@@ -515,21 +515,36 @@ constexpr int32_t kCapPanoramic = 4;
 constexpr int32_t kCapPanoramicAllDay = 8;
 constexpr int32_t kCapSmoothTransition = 2;  // SystemUI animates screen-off instead of cutting to black
 constexpr int32_t kCapDozeDirect = 1;        // gotoDozeWithOff=false: panel goes ON->DOZE, no OFF gap
+// Feature 211 = udfps type. Without bit 16 SystemUI takes the "optical, no local HBM" sleep path
+// (AodType 5001): a black mask over the lockscreen until the panel is in DOZE, then the AOD fades in.
+// With it, the lockscreen morphs into the panoramic AOD while the backlight ramps (AodType 4001).
+// Bit 16 is the truth here: mi_disp lights the sensor itself (LHBM_ON_WHITE_1000NIT on finger down),
+// so SystemUI also drops its own FP dim layer/highlight. system_server's FP path reads only bits
+// 4/1024, so it behaves as with no answer.
+constexpr int32_t kFeatureUdfpsType = 211;
+constexpr int32_t kUdfpsLocalHbm = 16;
 constexpr char kPanelFeatureService[] =
         "vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default";
 
 // Every other feature must look exactly as it did with no service at all, so callers keep their own
 // defaults: they read values[0] whatever `ret` says, and a 0 there is a real answer (feature 211 = 0
 // turned on SystemUI's fingerprint dim layer and system_server's "optical without local HBM" mode:
-// bright fingerprint icon over a dimmed lockscreen). "Unknown transaction" reaches Java callers as a
-// RemoteException, the same fallback path as a missing service.
+// bright fingerprint icon over a dimmed lockscreen; 211 is now answered with 16, see above).
+// "Unknown transaction" reaches Java callers as a RemoteException, the same fallback path as a
+// missing service.
 class PanelFeature : public aidl::vendor::oplus::hardware::displaypanelfeature::BnDisplayPanelFeature {
   public:
     // `values` arrives pre-sized to the caller's array length and must keep that length.
     ndk::ScopedAStatus getDisplayPanelFeatureValue(int32_t id, std::vector<int32_t>* values,
                                                    int32_t* ret) override {
-        if (id != kFeatureAodPanelCaps || values == nullptr || values->empty()) return unsupported();
-        (*values)[0] = kCapPanoramic | kCapPanoramicAllDay | kCapSmoothTransition | kCapDozeDirect;
+        if (values == nullptr || values->empty()) return unsupported();
+        if (id == kFeatureAodPanelCaps) {
+            (*values)[0] = kCapPanoramic | kCapPanoramicAllDay | kCapSmoothTransition | kCapDozeDirect;
+        } else if (id == kFeatureUdfpsType) {
+            (*values)[0] = kUdfpsLocalHbm;
+        } else {
+            return unsupported();
+        }
         *ret = 0;
         return ndk::ScopedAStatus::ok();
     }

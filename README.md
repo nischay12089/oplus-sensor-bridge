@@ -64,10 +64,10 @@ locking while holding the phone doesn't re-wake it.
   These styles pass no AOD brightness, so the framework's fallback backlight (~5) otherwise reaches
   the panel even in AOD (DBV ~15, nearly off).
 
-The DBV is only written once the panel is really in AOD, and never while a finger is on the sensor
-(`/sys/devices/virtual/touch/touch_dev/fod_press_status`). A thread sleeps in `poll()` on that node
-and puts the AOD DBV back after each touch (the kernel's local-HBM release restores the screen-on
-backlight even in AOD). Re-checks after a screen-state change run only when something can still
+The DBV is only written once the panel is really in AOD: every attempt reads the live screen state
+first, so a stale command never survives a wake or a later sleep. Finger presses are left to the
+stock fingerprint service and the kernel's local HBM; the bridge does no fingerprint monitoring.
+Re-checks after a screen-state change run only when something can still
 change: the DBV on AOD entry or a level change (densely from 0.12 s until it reads back right,
 which only counts from 0.4 s on: the panel enters AOD ~0.13 s after the screen state changes, and
 the framework's fallback DBV 15 lands 10-60 ms after that, so an earlier right read can be undone);
@@ -80,13 +80,18 @@ the panel enters AOD (measured 116-134 ms). Full-screen AOD going between doze a
 alone (measured), so it causes no timed wake-ups.
 
 **Display panel capabilities** (`vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default`).
-Answers feature 217 with **panoramic (4) + panoramic all-day (8)**: full-screen AOD stays on all day
-with a power block over the screen-off transition (no black flash). Every other feature id and
+Answers feature 217 with **15** = doze direct (1) + smooth transition (2) + panoramic (4) +
+panoramic all-day (8): full-screen AOD stays on all day and the panel goes ON→DOZE with no OFF gap.
+Answers feature 211 (udfps type) with **16 = local HBM**, which is true for this panel: mi_disp lights
+the sensor itself on finger down (`LHBM_ON_WHITE_1000NIT`). Without it SystemUI takes its "optical
+without local HBM" power-off path (AodType 5001): a black mask over the lockscreen until the panel is
+in DOZE, then the AOD fades in. With it the lockscreen or app morphs into the AOD while the backlight
+ramps (AodType 4001), and SystemUI drops its own fingerprint dim layer and highlight. system_server's
+fingerprint path reads only bits 4/1024 of 211, so it is unchanged. Every other feature id and
 method answers **"unknown transaction"**, exactly like no service. Callers read `values[0]` whatever
 the return code says, so even "unsupported + 0" is an answer: feature 211 = 0 once switched OxygenOS
 into "optical fingerprint without local HBM" (panel raised to ~8272 under a dark overlay: bright
-fingerprint icon over a dim lockscreen). The smooth-transition bit (2) is not reported: it hands AOD
-entry to a panel command this DDIC can't execute.
+fingerprint icon over a dim lockscreen).
 The stubs are generated from `aidl/IDisplayPanelFeature.aidl`, which must keep the framework's
 stable-AIDL V1 layout (hash `39afca22ac77253421ad681eeb2bae0c6ff62c13`): `getDisplayPanelInfo` takes
 `out List<String>`, so its request is only the id. Declared as `out String[]`, the stub also read an
