@@ -1,6 +1,6 @@
 /*
  * This file is auto-generated.  DO NOT MODIFY.
- * Using: C:\Users\Nischay_12089\AppData\Local\Android\Sdk\build-tools\35.0.0\aidl.exe --lang=ndk --structured --stability=vintf --version=1 -o C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -h C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -I C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl\vendor\oplus\hardware\displaypanelfeature\IDisplayPanelFeature.aidl
+ * Using: aidl --lang=ndk --structured --stability=vintf --version=1 --hash=39afca22ac77253421ad681eeb2bae0c6ff62c13 -o gen -h gen -I aidl aidl/vendor/oplus/hardware/displaypanelfeature/IDisplayPanelFeature.aidl (build-tools 35.0.0)
  */
 #pragma once
 
@@ -25,6 +25,7 @@ public:
   BnDisplayPanelFeature();
   virtual ~BnDisplayPanelFeature();
   ::ndk::ScopedAStatus getInterfaceVersion(int32_t* _aidl_return) final;
+  ::ndk::ScopedAStatus getInterfaceHash(std::string* _aidl_return) final;
 protected:
   ::ndk::SpAIBinder createBinder() override;
 private:

@@ -54,7 +54,12 @@ locking while holding the phone doesn't re-wake it.
   mode renders a DBV ~2.41× brighter than normal mode, so the bridge writes DBV = fade-end register
   ÷ 2.41 (clamped 16–808) through the driver's `mipi_rw` node (DCS `0x51`), after the kernel has put
   its own fixed AOD DBV in (~0.14 s after AOD entry; checked by reading DCS `0x52` back). The level
-  used to enter AOD is the closer one: low (`2`) for a dark-room target, normal (`1`) otherwise;
+  used to enter AOD is the closer one: low (`2`) for a dark-room target, normal (`1`) otherwise.
+  A return to AOD straight from ON only counts as a fade when the register is >= 40 (the darkest
+  AOD target ends at ~68): a fingerprint wake that never fully turned the screen on comes back at
+  the framework's fallback (~5), which otherwise gave DBV 16, nearly off. The register is checked
+  again while the DBV settles: dropping below 40 (it still showed the screen-on value at entry)
+  switches to the classic handling below;
 - **every other clock style** (enters doze via OFF): the fixed normal level (`1`) and its DBV (808).
   These styles pass no AOD brightness, so the framework's fallback backlight (~5) otherwise reaches
   the panel even in AOD (DBV ~15, nearly off).
@@ -63,9 +68,15 @@ The DBV is only written once the panel is really in AOD, and never while a finge
 (`/sys/devices/virtual/touch/touch_dev/fod_press_status`). A thread sleeps in `poll()` on that node
 and puts the AOD DBV back after each touch (the kernel's local-HBM release restores the screen-on
 backlight even in AOD). Re-checks after a screen-state change run only when something can still
-change: the DBV on AOD entry or a level change (densely around ~0.14 s, until it reads back right);
+change: the DBV on AOD entry or a level change (densely from 0.12 s until it reads back right,
+which only counts from 0.4 s on: the panel enters AOD ~0.13 s after the screen state changes, and
+the framework's fallback DBV 15 lands 10-60 ms after that, so an earlier right read can be undone);
 for classic styles also the level at 0.3/0.8/1.5/3 s (the framework's fallback can switch AOD off)
-and the DBV once at 0.3 s. Full-screen AOD going between doze and doze-suspend leaves level and DBV
+and the DBV once at 0.3 s. The level is never sent while the panel is still lit in normal mode: its
+command set starts with a normal-mode DBV write (`51 03 28` = 808), which snapped the screen to 808
+mid screen-off. So it is not sent on OFF at all (the kernel re-sends it when the panel powers on
+into AOD), and on an entry straight from ON it is sent 0.1 s after the state change, just before
+the panel enters AOD (measured 116-134 ms). Full-screen AOD going between doze and doze-suspend leaves level and DBV
 alone (measured), so it causes no timed wake-ups.
 
 **Display panel capabilities** (`vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default`).
@@ -76,6 +87,11 @@ the return code says, so even "unsupported + 0" is an answer: feature 211 = 0 on
 into "optical fingerprint without local HBM" (panel raised to ~8272 under a dark overlay: bright
 fingerprint icon over a dim lockscreen). The smooth-transition bit (2) is not reported: it hands AOD
 entry to a panel command this DDIC can't execute.
+The stubs are generated from `aidl/IDisplayPanelFeature.aidl`, which must keep the framework's
+stable-AIDL V1 layout (hash `39afca22ac77253421ad681eeb2bae0c6ff62c13`): `getDisplayPanelInfo` takes
+`out List<String>`, so its request is only the id. Declared as `out String[]`, the stub also read an
+array length the framework never sends, and the call failed with `NOT_ENOUGH_DATA`, which
+system_server does not catch (the CPH2723 port calls it at every boot and crashed every ~15 s).
 
 **AOD defaults** (same binary, `oplus-sensor-bridged --aod-defaults`, one-shot init service
 `vendor.oplus-aod-defaults`). Init starts it as uid shell once `sys.boot_completed=1` and

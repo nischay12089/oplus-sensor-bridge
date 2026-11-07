@@ -1,6 +1,6 @@
 /*
  * This file is auto-generated.  DO NOT MODIFY.
- * Using: C:\Users\Nischay_12089\AppData\Local\Android\Sdk\build-tools\35.0.0\aidl.exe --lang=ndk --structured --stability=vintf --version=1 -o C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -h C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\gen -I C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl C:\Users\Nischay_12089\Desktop\Fingerprint\dpfeature\aidl\vendor\oplus\hardware\displaypanelfeature\IDisplayPanelFeature.aidl
+ * Using: aidl --lang=ndk --structured --stability=vintf --version=1 --hash=39afca22ac77253421ad681eeb2bae0c6ff62c13 -o gen -h gen -I aidl aidl/vendor/oplus/hardware/displaypanelfeature/IDisplayPanelFeature.aidl (build-tools 35.0.0)
  */
 #pragma once
 
@@ -29,6 +29,7 @@ public:
   virtual ~IDisplayPanelFeature();
 
   static inline const int32_t version = 1;
+  static inline const std::string hash = "39afca22ac77253421ad681eeb2bae0c6ff62c13";
   static constexpr uint32_t TRANSACTION_getDisplayPanelFeatureValue = FIRST_CALL_TRANSACTION + 0;
   static constexpr uint32_t TRANSACTION_setDisplayPanelFeatureValue = FIRST_CALL_TRANSACTION + 1;
   static constexpr uint32_t TRANSACTION_getDisplayPanelInfo = FIRST_CALL_TRANSACTION + 2;
@@ -42,6 +43,7 @@ public:
   virtual ::ndk::ScopedAStatus setDisplayPanelFeatureValue(int32_t in_id, const std::vector<int32_t>& in_values, int32_t* _aidl_return) = 0;
   virtual ::ndk::ScopedAStatus getDisplayPanelInfo(int32_t in_id, std::vector<std::string>* out_info, int32_t* _aidl_return) = 0;
   virtual ::ndk::ScopedAStatus getInterfaceVersion(int32_t* _aidl_return) = 0;
+  virtual ::ndk::ScopedAStatus getInterfaceHash(std::string* _aidl_return) = 0;
 private:
   static std::shared_ptr<IDisplayPanelFeature> default_impl;
 };
@@ -51,6 +53,7 @@ public:
   ::ndk::ScopedAStatus setDisplayPanelFeatureValue(int32_t in_id, const std::vector<int32_t>& in_values, int32_t* _aidl_return) override;
   ::ndk::ScopedAStatus getDisplayPanelInfo(int32_t in_id, std::vector<std::string>* out_info, int32_t* _aidl_return) override;
   ::ndk::ScopedAStatus getInterfaceVersion(int32_t* _aidl_return) override;
+  ::ndk::ScopedAStatus getInterfaceHash(std::string* _aidl_return) override;
   ::ndk::SpAIBinder asBinder() override;
   bool isRemote() override;
 };
