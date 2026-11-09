@@ -45,7 +45,9 @@ handle, the sub-HAL index is its top byte, so it wins `getDefaultSensor(22, true
 `ccd_tilt`). `oplus-sensor-bridged` (init service `class hal`, user system, domain
 `hal_sensors_default`) reads the Xiaomi/QTI sensors through the vendor `libsensorndkbridge` and
 forwards translated events. Hub state reports in the first 300 ms after enabling are ignored, so
-locking while holding the phone doesn't re-wake it.
+locking while holding the phone doesn't re-wake it. Its sensor queue is a connection to
+sensorservice in system_server and dies with it without notice, so the rc restarts the daemon
+whenever zygote restarts (as `init.zygote64.rc` does for audioserver, netd, ...).
 
 The sub-HAL also exposes `gesture_prox_oplus` (33171066, wake-up, `0.0` near / `1.0` far,
 `values[1] = 1.0`). SystemUI's black-screen gestures and AOD pocket check look that type up before

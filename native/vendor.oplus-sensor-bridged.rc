@@ -21,6 +21,12 @@ service vendor.oplus-aod-defaults /vendor/bin/hw/oplus-sensor-bridged --aod-defa
 on property:sys.boot_completed=1 && property:persist.sys.device_provisioned=1
     start vendor.oplus-aod-defaults
 
+# The daemon's sensor queue is a connection to sensorservice in system_server and dies with it,
+# silently (pickup and AMD stop). system_server dying always restarts zygote: restart the daemon
+# too, like init.zygote64.rc does for audioserver, netd, ... It retries until sensorservice is up.
+on property:init.svc.zygote=restarting
+    restart vendor.oplus-sensor-bridged
+
 # Screen-off power. Xiaomi's citsensorservice (factory test) keeps the tsl2522 raw ALS (50 ms) and the
 # wake-up collision detector (5 ms) on at all times, so the sensor DSP never sleeps with the screen
 # off. Run it only while the screen is on (debug.tracing.screen_state: 2 on, 1 off, 3/4 doze). Its rc
