@@ -56,6 +56,9 @@ namespace {
 constexpr int kTypeXiaomiPickup = 33171036;
 constexpr int kTypeStationaryDetect = 29;
 constexpr int kTypeMotionDetect = 30;
+// Xiaomi pocket_mode: sensor-hub algorithm (its registry tunes a p-sensor threshold), cheap next to
+// the ultrasound proximity. Non-wake-up only: while the AP sleeps, a change arrives on its next wake.
+constexpr int kTypeXiaomiPocket = 33171095;
 constexpr int kIdSensors = 1;
 
 int64_t bootTimeNs() {
@@ -94,6 +97,24 @@ bool translatePickup(float xiaomiValue, int64_t msSinceEnable, float lastSent, f
     // Repeated lifts are kept (the hub can send 1.0 twice with no 2.0 in between, and each may
     // be a real pickup); repeated put-downs carry no new information.
     return !(*out == 1.0f && lastSent == 1.0f);
+}
+
+// Translate one xiaomi.sensor.oem_pocket event into the Oplus gesture-proximity convention:
+// write 0.0 (near) or 1.0 (far) to *out and return true to forward it, false to drop it.
+// Measured: v[0] is 0.0 in a pocket and 5.0 out of it (a palm over the sensor changes nothing).
+// Changes carry v[2] = 0. The report sent on enable carries v[2] = -1 and can be stale: after a
+// missed "out" change it read 0.0 twice with the phone on a desk. It is dropped; every activation
+// starts as far instead (setWantedLocked).
+bool translatePocket(const float* v, float* out) {
+    if (v[2] != 0.0f) return false;
+    if (v[0] == 0.0f) {
+        *out = 0.0f;
+    } else if (v[0] == 5.0f) {
+        *out = 1.0f;
+    } else {
+        return false;
+    }
+    return true;
 }
 
 // libsensorndkbridge has no ASensor_isWakeUpSensor / getDefaultSensorEx, so the wake-up variant
@@ -592,6 +613,7 @@ class Bridge {
         mPickup = findWakeUpSensor(mMgr, kTypeXiaomiPickup);
         mMotion = findWakeUpSensor(mMgr, kTypeMotionDetect);
         mStationary = findWakeUpSensor(mMgr, kTypeStationaryDetect);
+        mPocket = ASensorManager_getDefaultSensor(mMgr, kTypeXiaomiPocket);
         return mQueue != nullptr && mPickup != nullptr;
     }
 
@@ -665,6 +687,14 @@ class Bridge {
             disarm(mMotion);
             disarm(mStationary);
             if (on) arm(mMotion);
+        } else if (sensor == VS_GESTURE_PROX) {
+            if (mPocket) on ? arm(mPocket) : disarm(mPocket);
+            if (on) {
+                // A stale "near" would hide the AOD and block double tap on a desk: start far and
+                // follow real changes only. Without pocket_mode it simply stays far.
+                mLastProxSent = 1.0f;
+                sendEventLocked(VS_GESTURE_PROX, 1.0f, bootTimeNs());
+            }
         }
     }
 
@@ -706,6 +736,15 @@ class Bridge {
                 disarm(mStationary);
                 arm(mMotion);
                 break;
+            case kTypeXiaomiPocket: {
+                if (!mWanted[VS_GESTURE_PROX]) return;
+                float out;
+                if (translatePocket(e.data, &out) && out != mLastProxSent) {
+                    mLastProxSent = out;
+                    sendEventLocked(VS_GESTURE_PROX, out, e.timestamp);
+                }
+                break;
+            }
         }
     }
 
@@ -721,11 +760,13 @@ class Bridge {
     const ASensor* mPickup = nullptr;
     const ASensor* mMotion = nullptr;
     const ASensor* mStationary = nullptr;
+    const ASensor* mPocket = nullptr;
     std::mutex mLock;  // guards everything below
     int mFd = -1;
     bool mWanted[VS_COUNT] = {};
     int64_t mPickupEnabledAtNs = 0;
     float mLastPickupSent = -1.0f;
+    float mLastProxSent = -1.0f;
 };
 
 int main(int argc, char** argv) {

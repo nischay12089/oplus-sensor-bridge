@@ -10,6 +10,8 @@ SystemUI, com.oplus.gesture or any other app:
 - **AOD clock styles dimming off**: fixed AOD level and brightness, restored if knocked off
 - **AOD dimming after a fingerprint touch**, without ever writing the panel while a finger is down
 - **AOD defaults** applied once on a fresh flash, `aod_media_support` on every boot
+- **Ultrasound proximity on all night**: SystemUI's screen-off pocket checks get a cheap sensor
+- **Screen-off power**: Xiaomi services that keep sensors on or crash-loop with the screen off
 
 One vendor binary plus a Multi-HAL sub-HAL. No logging, no polling: every wait sleeps on a
 property futex, `poll()` or a blocking read (measured 0 CPU ticks in idle AOD).
@@ -44,6 +46,14 @@ handle, the sub-HAL index is its top byte, so it wins `getDefaultSensor(22, true
 `hal_sensors_default`) reads the Xiaomi/QTI sensors through the vendor `libsensorndkbridge` and
 forwards translated events. Hub state reports in the first 300 ms after enabling are ignored, so
 locking while holding the phone doesn't re-wake it.
+
+The sub-HAL also exposes `gesture_prox_oplus` (33171066, wake-up, `0.0` near / `1.0` far,
+`values[1] = 1.0`). SystemUI's black-screen gestures and AOD pocket check look that type up before
+the default proximity sensor, which on this vendor is the ultrasound one (sub-HAL 4): without it they
+kept the ultrasound on with the screen off. It is fed from Xiaomi `pocket_mode` (33171095: `v[0]`
+`0.0` in a pocket, `5.0` out). Every activation starts as far, because the report pocket_mode sends
+on enable can be stale (`v[2] = -1`, read 0.0 on a desk); only its changes (`v[2] = 0`) are
+forwarded.
 
 **AOD keep-alive** (only when build.prop has `ro.sys.nischay.bomb=1`). Sleeps on
 `debug.tracing.screen_state` and sets the panel's AOD level through the mi_disp ioctl
@@ -174,7 +184,7 @@ stub), so its sha256 depends on where the tree is checked out; the code is other
 
 ```
 adb shell getprop init.svc.vendor.oplus-sensor-bridged         # running
-adb shell dumpsys sensorservice | grep "Oplus Sensor Bridge"    # handles 0x1 and 0x2
+adb shell dumpsys sensorservice | grep "Oplus Sensor Bridge"    # handles 0x1, 0x2 and 0x3
 adb shell service check vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default  # found
 adb shell getprop init.svc.vendor.oplus-aod-defaults            # stopped (ran, exited)
 adb shell settings get secure aod_media_support                 # 1
@@ -190,5 +200,8 @@ adb shell getprop init.svc_debug_pid.syshealthmon-service       # same pid when 
   is dimmer than the panel's own fixed AOD levels (very dim in dark rooms). The 2.41× factor
   (`kAodGain`) comes from one observation; tune it if the AOD still steps at the end of the fade.
 - The kernel's fixed AOD DBV shows for a frame or two on each AOD entry before it is replaced.
+- Pocket detection is weak with the screen off: `pocket_mode` is non-wake-up, so changes made while
+  the phone sleeps arrive late or not at all (missed in 2 of 3 tests). Double tap can wake the
+  screen in a pocket and the AOD mostly stays on there; the trade is the ultrasound staying off.
 - Choosing a classic clock style in AOD settings makes the AOD app switch to energy saving and
   SystemUI turn full-screen AOD off; the bridge follows whatever style is picked.

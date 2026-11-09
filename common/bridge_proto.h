@@ -17,10 +17,14 @@ constexpr char kSocketName[] = "oplus_sensor_bridge";
 enum VirtualSensor : int32_t {
     VS_PICKUP = 1,  // Android type 22 (TILT_DETECTOR), OnePlus "pick_up_motion": 0.0 lift, 1.0 put down
     VS_AMD = 2,     // Oplus TYPE_AMD 33171026: 2.0 moving, 1.0 stationary
-    VS_COUNT = 3,
+    VS_GESTURE_PROX = 3,  // Oplus gesture proximity 33171066: 0.0 near, 1.0 far
+    VS_COUNT = 4,
 };
 
 constexpr int32_t kTypeOplusAmd = 33171026;
+// SystemUI looks this up (wake-up) before falling back to the default proximity sensor, which here
+// is the ultrasound one: black-screen gestures and the AOD pocket check keep it on with the screen off.
+constexpr int32_t kTypeOplusGestureProx = 33171066;
 
 enum MsgType : int32_t {
     MSG_ENABLE = 1,

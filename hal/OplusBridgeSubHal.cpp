@@ -2,6 +2,7 @@
 // OxygenOS SystemUI (AOD pickup) and com.oplus.gesture (raise to wake) look up by type:
 //   type 22       "pick_up_motion" wake-up, special reporting: 0.0 = lifted, 1.0 = put down
 //   type 33171026 "amd"            wake-up, on-change:         2.0 = moving, 1.0 = stationary
+//   type 33171066 "gesture_prox"   wake-up, on-change:         0.0 = near,   1.0 = far
 // Events are produced by oplus-sensor-bridged (root daemon) from the Xiaomi/QTI hub sensors and
 // delivered over an abstract unix socket. Must be listed FIRST in hals.conf so its type-22 sensor
 // has the lowest handle and wins SensorManager.getDefaultSensor(22, true) over QTI ccd_tilt.
@@ -95,6 +96,10 @@ class OplusBridgeSubHal : public ISensorsSubHal {
         mSensors.push_back(makeSensor(VS_AMD, "amd_oplus  Wakeup",
                                       static_cast<SensorType>(kTypeOplusAmd), "qti.sensor.amd",
                                       wake | static_cast<uint32_t>(SensorFlagBits::ON_CHANGE_MODE)));
+        mSensors.push_back(makeSensor(VS_GESTURE_PROX, "gesture_prox_oplus  Wakeup",
+                                      static_cast<SensorType>(kTypeOplusGestureProx),
+                                      "oplus.sensor.gesture_prox",
+                                      wake | static_cast<uint32_t>(SensorFlagBits::ON_CHANGE_MODE)));
     }
 
     Return<void> getSensorsList_2_1(getSensorsList_2_1_cb _hidl_cb) override {
@@ -154,9 +159,11 @@ class OplusBridgeSubHal : public ISensorsSubHal {
     Return<void> debug(const hidl_handle& fd, const hidl_vec<hidl_string>&) override {
         if (fd.getNativeHandle() == nullptr || fd->numFds < 1) return Void();
         std::lock_guard<std::mutex> lock(mLock);
-        dprintf(fd->data[0], "OplusSensorBridge: daemon=%s pickup=%d amd=%d in=%llu posted=%llu\n",
+        dprintf(fd->data[0],
+                "OplusSensorBridge: daemon=%s pickup=%d amd=%d gesture_prox=%d in=%llu posted=%llu\n",
                 mClientFd >= 0 ? "connected" : "absent", mEnabled[VS_PICKUP], mEnabled[VS_AMD],
-                (unsigned long long)mEventsIn.load(), (unsigned long long)mEventsPosted.load());
+                mEnabled[VS_GESTURE_PROX], (unsigned long long)mEventsIn.load(),
+                (unsigned long long)mEventsPosted.load());
         return Void();
     }
 
@@ -266,6 +273,9 @@ class OplusBridgeSubHal : public ISensorsSubHal {
             e.sensorType = mSensors[m.sensor - 1].type;
             for (size_t k = 0; k < 16; k++) e.u.data[k] = 0.0f;
             e.u.data[0] = m.value;
+            // SystemUI reads values[1] == 0.0 as "screen facing down"; a plain proximity sensor
+            // (its fallback) has no values[1], which it treats as 1.0.
+            if (m.sensor == VS_GESTURE_PROX) e.u.data[1] = 1.0f;
             BLOGI("event sensor=%d value=%.1f", m.sensor, m.value);
             post(e);
         }
