@@ -10,6 +10,8 @@ SystemUI, com.oplus.gesture or any other app:
 - **AOD clock styles dimming off**: fixed AOD level and brightness, restored if knocked off
 - **AOD dimming after a fingerprint touch**, without ever writing the panel while a finger is down
 - **AOD defaults** applied once on a fresh flash, `aod_media_support` on every boot
+- **Ultrasound proximity on all night**: SystemUI's screen-off pocket checks get a cheap sensor
+- **Screen-off power**: Xiaomi services that keep sensors on or crash-loop with the screen off
 
 One vendor binary plus a Multi-HAL sub-HAL. No logging, no polling: every wait sleeps on a
 property futex, `poll()` or a blocking read (measured 0 CPU ticks in idle AOD).
@@ -43,7 +45,17 @@ handle, the sub-HAL index is its top byte, so it wins `getDefaultSensor(22, true
 `ccd_tilt`). `oplus-sensor-bridged` (init service `class hal`, user system, domain
 `hal_sensors_default`) reads the Xiaomi/QTI sensors through the vendor `libsensorndkbridge` and
 forwards translated events. Hub state reports in the first 300 ms after enabling are ignored, so
-locking while holding the phone doesn't re-wake it.
+locking while holding the phone doesn't re-wake it. Its sensor queue is a connection to
+sensorservice in system_server and dies with it without notice, so the rc restarts the daemon
+whenever zygote restarts (as `init.zygote64.rc` does for audioserver, netd, ...).
+
+The sub-HAL also exposes `gesture_prox_oplus` (33171066, wake-up, `0.0` near / `1.0` far,
+`values[1] = 1.0`). SystemUI's black-screen gestures and AOD pocket check look that type up before
+the default proximity sensor, which on this vendor is the ultrasound one (sub-HAL 4): without it they
+kept the ultrasound on with the screen off. It is fed from Xiaomi `pocket_mode` (33171095: `v[0]`
+`0.0` in a pocket, `5.0` out). Every activation starts as far, because the report pocket_mode sends
+on enable can be stale (`v[2] = -1`, read 0.0 on a desk); only its changes (`v[2] = 0`) are
+forwarded.
 
 **AOD keep-alive** (only when build.prop has `ro.sys.nischay.bomb=1`). Sleeps on
 `debug.tracing.screen_state` and sets the panel's AOD level through the mi_disp ioctl
@@ -109,6 +121,17 @@ system_server does not catch (the CPH2723 port calls it at every boot and crashe
   then the marker `oplus_bridge_aod_defaults_v2`. Applied only if the marker reads back as unset,
   so changes made in Settings are never overwritten.
 
+**Screen-off power** (triggers in `native/vendor.oplus-sensor-bridged.rc`, plus a seccomp append).
+- Xiaomi's `citsensorservice` (factory test, `/odm`) holds the tsl2522 raw ALS (50 ms) and the
+  wake-up collision detector (5 ms) the whole time it runs, so the sensor DSP never sleeps with the
+  screen off. The rc stops it on `debug.tracing.screen_state` 1/3/4 and starts it again on 2;
+  stopping it releases both sensors (`dumpsys sensorservice`).
+- `vendor.mitrustedui` (Xiaomi trusted UI) waits for a QTI system-helper callback service that this
+  system never registers, retrying every second forever. Its `/odm` rc starts it on
+  `boot_completed`, after any vendor trigger on that property, so the rc stops it once it runs.
+- `vendor.qsap.qapeservice`, `vendor.qesdk-securitymgr` and `syshealthmon-service` crash-loop every
+  ~5 s: their seccomp policies don't allow `lseek`. With `lseek: 1` appended they stay up.
+
 ## Layout
 
 | Path | What |
@@ -118,7 +141,7 @@ system_server does not catch (the CPH2723 port calls it at every boot and crashe
 | `common/bridge_proto.h` | Socket protocol between the two |
 | `aidl/` | `IDisplayPanelFeature.aidl` and its generated NDK stubs (+ small compat headers) |
 | `native/` | Init `.rc`, SELinux rules, on-device dev installers |
-| `patches/` | SELinux appends, `repack_attributes.txt` (fs_config + file_contexts) |
+| `patches/` | SELinux and seccomp appends, `repack_attributes.txt` (fs_config + file_contexts) |
 | `module/` | Older KernelSU/Magisk module variant (sub-HAL + NDK daemon, no panel service) |
 | `aosp/` | AOSP headers to build against (HIDL sensors 1.0/2.0/2.1, libhidl, multihal) |
 | `sysroot/` | `libcxx_abi/__config_site`; `vendor_lib64/` is filled by `pull_vendor_libs.sh` |
@@ -153,18 +176,24 @@ stub), so its sha256 depends on where the tree is checked out; the code is other
    still reference it (bootloop risk).
 3. Enforcing builds: also append `patches/aod_defaults_enforcing.cil` (lets the one-shot run
    `cmd settings`), or the AOD defaults are simply not applied.
-4. build.prop: `ro.sys.nischay.bomb=1`. Optional, faster full-screen AOD lock/wake fades:
+4. Append `patches/seccomp_policy_lseek.append` to `vendor/etc/seccomp_policy/qsap_qapeservice.policy`,
+   `qesdksec.policy` and `syshealthmon.policy` (the stock files end in a newline; keep
+   `0 0 0644`, `vendor_configs_file`).
+5. build.prop: `ro.sys.nischay.bomb=1`. Optional, faster full-screen AOD lock/wake fades:
    `ro.oplus.display.panoramic_aod_force_update_rate=true`, `debug.oplus.display.fast_rate_scale=4.0`.
 
 ## Verify
 
 ```
 adb shell getprop init.svc.vendor.oplus-sensor-bridged         # running
-adb shell dumpsys sensorservice | grep "Oplus Sensor Bridge"    # handles 0x1 and 0x2
+adb shell dumpsys sensorservice | grep "Oplus Sensor Bridge"    # handles 0x1, 0x2 and 0x3
 adb shell service check vendor.oplus.hardware.displaypanelfeature.IDisplayPanelFeature/default  # found
 adb shell getprop init.svc.vendor.oplus-aod-defaults            # stopped (ran, exited)
 adb shell settings get secure aod_media_support                 # 1
 adb shell cat /sys/devices/virtual/mi_display/disp_feature/disp-DSI-0/doze_brightness  # 1 or 2 in AOD, 0 on
+adb shell getprop init.svc.citsensorservice                     # stopped with the screen off, running when on
+adb shell getprop init.svc.vendor.mitrustedui                   # stopped
+adb shell getprop init.svc_debug_pid.syshealthmon-service       # same pid when read again 10 s later
 ```
 
 ## Known limits
@@ -173,5 +202,16 @@ adb shell cat /sys/devices/virtual/mi_display/disp_feature/disp-DSI-0/doze_brigh
   is dimmer than the panel's own fixed AOD levels (very dim in dark rooms). The 2.41× factor
   (`kAodGain`) comes from one observation; tune it if the AOD still steps at the end of the fade.
 - The kernel's fixed AOD DBV shows for a frame or two on each AOD entry before it is replaced.
+- Pocket detection is weak with the screen off: `pocket_mode` is non-wake-up, so changes made while
+  the phone sleeps arrive late or not at all (missed in 2 of 3 tests). Double tap can wake the
+  screen in a pocket and the AOD mostly stays on there; the trade is the ultrasound staying off.
+- If system_server restarts while the screen is off (crash, `ctl.restart zygote`), the screen stays
+  black afterwards: touch, vibration and screenshots work, the panel is on at the right brightness,
+  but OxygenOS's SurfaceFlinger keeps a screen effect on every layer (`clientType=VFXANIMATION` in
+  `dumpsys SurfaceFlinger`) that the new system_server never clears. A restart with the screen on
+  is fine. Not caused by the bridge, but the rc works around it: when zygote restarts it restarts
+  SurfaceFlinger once (whose own rc restarts zygote again); a latch service
+  (`vendor.oplus-sf-reset-latch`, the daemon with `--latch`) blocks a second reset until boot
+  completes, so it cannot loop. Manual fix: `su -c 'setprop ctl.restart surfaceflinger'` or reboot.
 - Choosing a classic clock style in AOD settings makes the AOD app switch to energy saving and
   SystemUI turn full-screen AOD off; the bridge follows whatever style is picked.

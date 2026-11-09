@@ -20,3 +20,49 @@ service vendor.oplus-aod-defaults /vendor/bin/hw/oplus-sensor-bridged --aod-defa
 
 on property:sys.boot_completed=1 && property:persist.sys.device_provisioned=1
     start vendor.oplus-aod-defaults
+
+# The daemon's sensor queue is a connection to sensorservice in system_server and dies with it,
+# silently (pickup and AMD stop). system_server dying always restarts zygote: restart the daemon
+# too, like init.zygote64.rc does for audioserver, netd, ... It retries until sensorservice is up.
+on property:init.svc.zygote=restarting
+    restart vendor.oplus-sensor-bridged
+
+# A zygote restart leaves SurfaceFlinger running, and when system_server died with the screen off,
+# OxygenOS's SurfaceFlinger keeps a screen effect on every layer: the screen stays black after
+# wake-up. Reset SurfaceFlinger once per crash. Its rc restarts zygote again (onrestart restart
+# --only-if-running zygote), so the latch (a service that only sleeps) blocks a second reset until
+# boot completes again. The latch has no state before the first boot completes: no reset at boot.
+service vendor.oplus-sf-reset-latch /vendor/bin/hw/oplus-sensor-bridged --latch
+    user system
+    group system
+    oneshot
+    disabled
+
+on property:init.svc.zygote=restarting && property:init.svc.vendor.oplus-sf-reset-latch=stopped
+    start vendor.oplus-sf-reset-latch
+    restart surfaceflinger
+
+on property:sys.boot_completed=1
+    stop vendor.oplus-sf-reset-latch
+
+# Screen-off power. Xiaomi's citsensorservice (factory test) keeps the tsl2522 raw ALS (50 ms) and the
+# wake-up collision detector (5 ms) on at all times, so the sensor DSP never sleeps with the screen
+# off. Run it only while the screen is on (debug.tracing.screen_state: 2 on, 1 off, 3/4 doze). Its rc
+# is on /odm: init resolves service names when an action runs, not when this file is parsed.
+on property:debug.tracing.screen_state=1
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=3
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=4
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=2
+    start citsensorservice
+
+# Xiaomi trusted UI waits for vendor.qti.hardware.systemhelperaidl.ISystemTUICallback, which this
+# system never registers, retrying every second forever. Its /odm rc starts it on boot_completed,
+# after any trigger of ours on that property (odm is parsed after vendor), so stop it once running.
+on property:init.svc.vendor.mitrustedui=running
+    stop vendor.mitrustedui
