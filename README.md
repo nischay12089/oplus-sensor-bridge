@@ -209,7 +209,9 @@ adb shell getprop init.svc_debug_pid.syshealthmon-service       # same pid when 
   black afterwards: touch, vibration and screenshots work, the panel is on at the right brightness,
   but OxygenOS's SurfaceFlinger keeps a screen effect on every layer (`clientType=VFXANIMATION` in
   `dumpsys SurfaceFlinger`) that the new system_server never clears. A restart with the screen on
-  is fine. Recover with `su -c 'setprop ctl.restart surfaceflinger'` (restarts zygote too) or a
-  reboot. Not caused by the bridge; restarting the daemon has no effect on it.
+  is fine. Not caused by the bridge, but the rc works around it: when zygote restarts it restarts
+  SurfaceFlinger once (whose own rc restarts zygote again); a latch service
+  (`vendor.oplus-sf-reset-latch`, the daemon with `--latch`) blocks a second reset until boot
+  completes, so it cannot loop. Manual fix: `su -c 'setprop ctl.restart surfaceflinger'` or reboot.
 - Choosing a classic clock style in AOD settings makes the AOD app switch to energy saving and
   SystemUI turn full-screen AOD off; the bridge follows whatever style is picked.

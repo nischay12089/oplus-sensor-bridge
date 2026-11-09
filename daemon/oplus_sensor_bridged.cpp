@@ -774,6 +774,10 @@ int main(int argc, char** argv) {
         applyAodDefaults();
         return 0;
     }
+    // Init latch for the SurfaceFlinger reset in the rc: "running" means the reset was done.
+    if (argc > 1 && strcmp(argv[1], "--latch") == 0) {
+        for (;;) pause();
+    }
 #ifdef BRIDGE_PANEL_FEATURE
     startPanelFeatureService();
 #endif
