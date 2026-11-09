@@ -20,3 +20,25 @@ service vendor.oplus-aod-defaults /vendor/bin/hw/oplus-sensor-bridged --aod-defa
 
 on property:sys.boot_completed=1 && property:persist.sys.device_provisioned=1
     start vendor.oplus-aod-defaults
+
+# Screen-off power. Xiaomi's citsensorservice (factory test) keeps the tsl2522 raw ALS (50 ms) and the
+# wake-up collision detector (5 ms) on at all times, so the sensor DSP never sleeps with the screen
+# off. Run it only while the screen is on (debug.tracing.screen_state: 2 on, 1 off, 3/4 doze). Its rc
+# is on /odm: init resolves service names when an action runs, not when this file is parsed.
+on property:debug.tracing.screen_state=1
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=3
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=4
+    stop citsensorservice
+
+on property:debug.tracing.screen_state=2
+    start citsensorservice
+
+# Xiaomi trusted UI waits for vendor.qti.hardware.systemhelperaidl.ISystemTUICallback, which this
+# system never registers, retrying every second forever. Its /odm rc starts it on boot_completed,
+# after any trigger of ours on that property (odm is parsed after vendor), so stop it once running.
+on property:init.svc.vendor.mitrustedui=running
+    stop vendor.mitrustedui

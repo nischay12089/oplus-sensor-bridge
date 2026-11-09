@@ -109,6 +109,17 @@ system_server does not catch (the CPH2723 port calls it at every boot and crashe
   then the marker `oplus_bridge_aod_defaults_v2`. Applied only if the marker reads back as unset,
   so changes made in Settings are never overwritten.
 
+**Screen-off power** (triggers in `native/vendor.oplus-sensor-bridged.rc`, plus a seccomp append).
+- Xiaomi's `citsensorservice` (factory test, `/odm`) holds the tsl2522 raw ALS (50 ms) and the
+  wake-up collision detector (5 ms) the whole time it runs, so the sensor DSP never sleeps with the
+  screen off. The rc stops it on `debug.tracing.screen_state` 1/3/4 and starts it again on 2;
+  stopping it releases both sensors (`dumpsys sensorservice`).
+- `vendor.mitrustedui` (Xiaomi trusted UI) waits for a QTI system-helper callback service that this
+  system never registers, retrying every second forever. Its `/odm` rc starts it on
+  `boot_completed`, after any vendor trigger on that property, so the rc stops it once it runs.
+- `vendor.qsap.qapeservice`, `vendor.qesdk-securitymgr` and `syshealthmon-service` crash-loop every
+  ~5 s: their seccomp policies don't allow `lseek`. With `lseek: 1` appended they stay up.
+
 ## Layout
 
 | Path | What |
@@ -118,7 +129,7 @@ system_server does not catch (the CPH2723 port calls it at every boot and crashe
 | `common/bridge_proto.h` | Socket protocol between the two |
 | `aidl/` | `IDisplayPanelFeature.aidl` and its generated NDK stubs (+ small compat headers) |
 | `native/` | Init `.rc`, SELinux rules, on-device dev installers |
-| `patches/` | SELinux appends, `repack_attributes.txt` (fs_config + file_contexts) |
+| `patches/` | SELinux and seccomp appends, `repack_attributes.txt` (fs_config + file_contexts) |
 | `module/` | Older KernelSU/Magisk module variant (sub-HAL + NDK daemon, no panel service) |
 | `aosp/` | AOSP headers to build against (HIDL sensors 1.0/2.0/2.1, libhidl, multihal) |
 | `sysroot/` | `libcxx_abi/__config_site`; `vendor_lib64/` is filled by `pull_vendor_libs.sh` |
@@ -153,7 +164,10 @@ stub), so its sha256 depends on where the tree is checked out; the code is other
    still reference it (bootloop risk).
 3. Enforcing builds: also append `patches/aod_defaults_enforcing.cil` (lets the one-shot run
    `cmd settings`), or the AOD defaults are simply not applied.
-4. build.prop: `ro.sys.nischay.bomb=1`. Optional, faster full-screen AOD lock/wake fades:
+4. Append `patches/seccomp_policy_lseek.append` to `vendor/etc/seccomp_policy/qsap_qapeservice.policy`,
+   `qesdksec.policy` and `syshealthmon.policy` (the stock files end in a newline; keep
+   `0 0 0644`, `vendor_configs_file`).
+5. build.prop: `ro.sys.nischay.bomb=1`. Optional, faster full-screen AOD lock/wake fades:
    `ro.oplus.display.panoramic_aod_force_update_rate=true`, `debug.oplus.display.fast_rate_scale=4.0`.
 
 ## Verify
@@ -165,6 +179,9 @@ adb shell service check vendor.oplus.hardware.displaypanelfeature.IDisplayPanelF
 adb shell getprop init.svc.vendor.oplus-aod-defaults            # stopped (ran, exited)
 adb shell settings get secure aod_media_support                 # 1
 adb shell cat /sys/devices/virtual/mi_display/disp_feature/disp-DSI-0/doze_brightness  # 1 or 2 in AOD, 0 on
+adb shell getprop init.svc.citsensorservice                     # stopped with the screen off, running when on
+adb shell getprop init.svc.vendor.mitrustedui                   # stopped
+adb shell getprop init.svc_debug_pid.syshealthmon-service       # same pid when read again 10 s later
 ```
 
 ## Known limits

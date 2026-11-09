@@ -9,6 +9,9 @@ vendor/etc/sensors/hals.conf 0 0 0644
 vendor/etc/selinux/vendor_sepolicy.cil 0 0 0644
 vendor/etc/selinux/vendor_file_contexts 0 0 0644
 vendor/etc/selinux/vendor_service_contexts 0 0 0644
+vendor/etc/seccomp_policy/qsap_qapeservice.policy 0 0 0644
+vendor/etc/seccomp_policy/qesdksec.policy 0 0 0644
+vendor/etc/seccomp_policy/syshealthmon.policy 0 0 0644
 
 # file_contexts
 /vendor/lib64/sensors\.oplusbridge\.so u:object_r:vendor_file:s0
@@ -18,3 +21,4 @@ vendor/etc/selinux/vendor_service_contexts 0 0 0644
 /vendor/etc/selinux/vendor_sepolicy\.cil u:object_r:vendor_configs_file:s0
 /vendor/etc/selinux/vendor_file_contexts u:object_r:vendor_configs_file:s0
 /vendor/etc/selinux/vendor_service_contexts u:object_r:vendor_configs_file:s0
+/vendor/etc/seccomp_policy/(qsap_qapeservice|qesdksec|syshealthmon)\.policy u:object_r:vendor_configs_file:s0
